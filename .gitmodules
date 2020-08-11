@@ -1,0 +1,4 @@
+[submodule "fs/exfat"]
+	path = fs/exfat
+	url = https://github.com/arter97/exfat-linux
+	branch = old
