@@ -1295,6 +1295,7 @@ int fimc_is_hardware_config_lock(struct fimc_is_hw_ip *hw_ip, u32 instance, u32 
 	u32 sensor_fcount;
 	u32 fcount = framenum + 1;
 	u32 log_count;
+	bool req_int_shot = false;
 
 	BUG_ON(!hw_ip);
 
@@ -1318,15 +1319,39 @@ int fimc_is_hardware_config_lock(struct fimc_is_hw_ip *hw_ip, u32 instance, u32 
 
 retry_get_frame:
 	framemgr_e_barrier(framemgr, 0);
-		frame = get_frame(framemgr, FS_HW_REQUEST);
+
+	/*
+	 * Check fcount of the requested frame before handling it.
+	 * The fcount of next shot,
+	 * which is going to be delivered to HW within N config_lock,
+	 * must be N+1 to guarantee the fcount synchronization with sensor device.
+	 */
+	frame = peek_frame(framemgr, FS_HW_REQUEST);
 	if (!IS_ERR_OR_NULL(frame)) {
-		if (unlikely(frame->fcount <= framenum)) {
-			put_frame(framemgr, frame, FS_HW_WAIT_DONE);
+		if (unlikely(frame->fcount < fcount)) {
+			/* Fcount of the requested frame is too old. Flush it. */
+			trans_frame(framemgr, frame, FS_HW_WAIT_DONE);
+
 			framemgr_x_barrier(framemgr, 0);
-			fimc_is_hardware_frame_ndone(hw_ip, frame, instance, IS_SHOT_UNPROCESSED);
+
+			if (fimc_is_hardware_frame_ndone(hw_ip, frame, instance,
+						IS_SHOT_UNPROCESSED)) {
+				err_hw("[F:%d][HWID:%d]: failure in hardware_frame_ndone",
+					frame->instance, hw_ip->id);
+			}
+
 			goto retry_get_frame;
+		} else if (unlikely(frame->fcount > fcount)) {
+			/* Fcount of the requested frame is too fast. Skip it. */
+			req_int_shot = true;
+		} else {
+			/* It is the expected fcount. Use it. */
+			frame = get_frame(framemgr, FS_HW_REQUEST);
 		}
 	} else {
+		req_int_shot = true;
+	}
+	if (req_int_shot) {
 		ret = make_internal_shot(hw_ip, instance, fcount, &frame, framemgr);
 		if (ret == INTERNAL_SHOT_EXIST) {
 			framemgr_x_barrier(framemgr, 0);
@@ -1368,34 +1393,31 @@ retry_get_frame:
 	return ret;
 }
 
-void check_late_shot(struct fimc_is_hw_ip *hw_ip)
+void check_late_shot(struct fimc_is_hw_ip *hw_ip, u32 fcount)
 {
-	int ret = 0;
 	struct fimc_is_frame *frame;
-	struct fimc_is_framemgr *framemgr;
+	struct fimc_is_framemgr *framemgr = hw_ip->framemgr_late;
 
-	/* check LATE_FRAME */
-	framemgr = hw_ip->framemgr_late;
 	framemgr_e_barrier(framemgr, 0);
-	if (!framemgr->queued_count[FS_HW_REQUEST]) {
+
+	/*
+	 * Handle LATE_FRAME error only for the frame that is being processed
+	 * or has been processed.
+	 */
+	frame = peek_frame(framemgr, FS_HW_REQUEST);
+	if (frame && frame->fcount <= fcount) {
+		trans_frame(framemgr, frame, FS_HW_WAIT_DONE);
+
 		framemgr_x_barrier(framemgr, 0);
-		return;
+
+		if (fimc_is_hardware_frame_ndone(hw_ip, frame, frame->instance,
+					IS_SHOT_LATE_FRAME)) {
+			mserr_hw("failure in hardware_frame_ndone",
+					frame->instance, hw_ip);
+		}
+	} else {
+		framemgr_x_barrier(framemgr, 0);
 	}
-	frame = get_frame(framemgr, FS_HW_REQUEST);
-	framemgr_x_barrier(framemgr, 0);
-
-	if (frame == NULL)
-		return;
-
-	framemgr_e_barrier(framemgr, 0);
-	put_frame(framemgr, frame, FS_HW_WAIT_DONE);
-	framemgr_x_barrier(framemgr, 0);
-
-	ret = fimc_is_hardware_frame_ndone(hw_ip, frame, frame->instance, IS_SHOT_LATE_FRAME);
-	if (ret)
-		mserr_hw("F_NDONE fail", frame->instance, hw_ip);
-
-	return;
 }
 
 void fimc_is_hardware_size_dump(struct fimc_is_hw_ip *hw_ip)
@@ -1501,13 +1523,13 @@ void fimc_is_hardware_frame_start(struct fimc_is_hw_ip *hw_ip, u32 instance)
 
 	put_frame(framemgr, frame, FS_HW_WAIT_DONE);
 		framemgr_x_barrier(framemgr, 0);
+
+		if (test_bit(FIMC_IS_GROUP_OTF_INPUT, &head->state))
+			check_late_shot(hw_ip, frame->fcount);
 	}
 
 	clear_bit(HW_CONFIG, &hw_ip->state);
 	atomic_set(&hw_ip->status.Vvalid, V_VALID);
-
-	if (test_bit(FIMC_IS_GROUP_OTF_INPUT, &hw_ip->group[instance]->state))
-		check_late_shot(hw_ip);
 }
 
 int fimc_is_hardware_sensor_start(struct fimc_is_hardware *hardware, u32 instance,

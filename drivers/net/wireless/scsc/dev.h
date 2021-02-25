@@ -128,7 +128,7 @@ static const u16 slsi_rates_table[3][2][10] = {
 #define SLSI_RX_WAKELOCK_TIME (1000)
 #define MAX_BA_BUFFER_SIZE 64
 #define NUM_BA_SESSIONS_PER_PEER 8
-#define MAX_CHANNEL_LIST 20
+#define SLSI_NCHO_MAX_CHANNEL_LIST 20
 #define SLSI_MAX_RX_BA_SESSIONS (8)
 #define SLSI_STA_ACTION_FRAME_BITMAP (SLSI_ACTION_FRAME_PUBLIC | SLSI_ACTION_FRAME_WMM | SLSI_ACTION_FRAME_WNM |\
 				      SLSI_ACTION_FRAME_QOS | SLSI_ACTION_FRAME_PROTECTED_DUAL |\
@@ -322,6 +322,11 @@ struct slsi_ssid_map {
 	u8 ssid_len;
 	u8 age;
 	int band;
+};
+
+struct slsi_ioctl_args {
+	int arg_count;
+	u8  *args[];
 };
 
 #ifdef CONFIG_SCSC_WLAN_STA_ENHANCED_ARP_DETECT
@@ -550,13 +555,14 @@ struct slsi_vif_sta {
 	u8                      regd_mc_addr_count;
 	u8                      regd_mc_addr[SLSI_MC_ADDR_ENTRY_MAX][ETH_ALEN];
 	bool                    group_key_set;
+	bool			wep_key_set;
 	struct sk_buff          *mlme_scan_ind_skb;
 	bool                    roam_in_progress;
 	int                     tdls_peer_sta_records;
 	bool                    tdls_enabled;
 	struct cfg80211_bss     *sta_bss;
 	u8                      *assoc_req_add_info_elem;
-	u8                      assoc_req_add_info_elem_len;
+	int                     assoc_req_add_info_elem_len;
 
 	/* List of seen ESS and Freq associated with them */
 	struct list_head        network_map;
@@ -573,6 +579,9 @@ struct slsi_vif_sta {
 	atomic_t                drop_roamed_ind;
 	u8                      *vendor_disconnect_ies;
 	int                     vendor_disconnect_ies_len;
+	u8                      bssid[ETH_ALEN];
+	u8                      ssid[IEEE80211_MAX_SSID_LEN];
+	u8                      ssid_len;
 };
 
 struct slsi_vif_unsync {
@@ -840,7 +849,7 @@ struct slsi_apf_capabilities {
 #ifdef CONFIG_SCSC_WLAN_WES_NCHO
 struct slsi_wes_mode_roam_scan_channels {
 	int n;
-	u8  channels[MAX_CHANNEL_LIST];
+	u8  channels[SLSI_NCHO_MAX_CHANNEL_LIST];
 };
 #endif
 
@@ -892,15 +901,16 @@ struct slsi_dev_config {
 
 	int                                     roam_scan_mode;
 
+	int                                     dfs_scan_mode;
+
+	int                                     ncho_mode;
+
 	/*WES mode roam scan channels*/
 	struct slsi_wes_mode_roam_scan_channels wes_roam_scan_list;
 #endif
 	struct slsi_802_11d_reg_domain          domain_info;
-
 	int                                     ap_disconnect_ind_timeout;
-
 	u8                                      host_state;
-
 	int                                     rssi_boost_5g;
 	int                                     rssi_boost_2g;
 	bool                                    disable_ch12_ch13;
@@ -1179,6 +1189,8 @@ struct slsi_dev {
 #ifdef CONFIG_SCSC_WLAN_ENHANCED_PKT_FILTER
 	bool                       enhanced_pkt_filter_enabled;
 #endif
+	u8                         fw_ext_cap_ie[9]; /*extended capability IE length is 9 */
+	u32                        fw_ext_cap_ie_len;
 };
 
 /* Compact representation of channels a ESS has been seen on

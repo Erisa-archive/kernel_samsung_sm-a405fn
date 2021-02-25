@@ -580,6 +580,10 @@
 
 				mif,num_of_usim_det = <1>;
 				mif,usim-det0-gpio = <&gpa2 6 0>;
+				
+				usim_check_delay_msec = <100>;
+				usim_high_detect_count = <25>;
+				usim_low_detect_count = <2>;
 			};
 
 			mailbox_gnss: mcu_ipc@120D0000 {

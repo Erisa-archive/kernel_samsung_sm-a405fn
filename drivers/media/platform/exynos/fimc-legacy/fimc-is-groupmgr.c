@@ -460,6 +460,21 @@ void * fimc_is_gframe_rewind(struct fimc_is_groupmgr *groupmgr,
 	return gframe;
 }
 
+void *fimc_is_gframe_group_find(struct fimc_is_group *group, u32 target_fcount)
+{
+	struct fimc_is_group_frame *gframe;
+
+	BUG_ON(!group);
+	BUG_ON(group->instance >= FIMC_IS_STREAM_COUNT);
+
+	list_for_each_entry(gframe, &group->gframe_head, list) {
+		if (gframe->fcount == target_fcount)
+			return gframe;
+	}
+
+	return NULL;
+}
+
 int fimc_is_gframe_flush(struct fimc_is_groupmgr *groupmgr,
 	struct fimc_is_group *group)
 {
@@ -3227,8 +3242,8 @@ int fimc_is_group_done(struct fimc_is_groupmgr *groupmgr,
 	if (unlikely((done_state != VB2_BUF_STATE_DONE) && gnext)) {
 		spin_lock_irqsave(&gframemgr->gframe_slock, flags);
 
-		fimc_is_gframe_group_head(gnext, &gframe);
-		if (gframe && (gframe->fcount == frame->fcount)) {
+		gframe = fimc_is_gframe_group_find(gnext, frame->fcount);
+		if (gframe) {
 			ret = fimc_is_gframe_trans_grp_to_fre(gframemgr, gframe, gnext);
 			if (ret) {
 				mgerr("fimc_is_gframe_trans_grp_to_fre is fail(%d)", device, gnext, ret);
